@@ -32,6 +32,14 @@ struct Cli {
     )]
     query_file: Option<PathBuf>,
 
+    /// Enable json for both input and output
+    #[arg(short = 'J', long, group = "format")]
+    json: bool,
+
+    /// Enable yaml for both input and output
+    #[arg(short = 'Y', long, group = "format")]
+    yaml: bool,
+
     #[clap(flatten)]
     input_format: InputFormatArg,
 
@@ -52,15 +60,21 @@ enum SerializationFormat {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, clap::Args)]
 struct InputFormatArg {
     /// Specify input format
-    #[arg(long, value_enum, default_value_t, group = "input-format")]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        group = "input-format",
+        conflicts_with = "format"
+    )]
     input_format: SerializationFormat,
 
     /// Read input as json values
-    #[arg(long, group = "input-format")]
+    #[arg(long, group = "input-format", conflicts_with = "format")]
     json_input: bool,
 
     /// Read input as yaml values
-    #[arg(long, group = "input-format")]
+    #[arg(long, group = "input-format", conflicts_with = "format")]
     yaml_input: bool,
 
     /// Treat each line of input will be supplied to the filter as a string.
@@ -79,30 +93,24 @@ struct InputFormatArg {
     slurp: bool,
 }
 
-impl InputFormatArg {
-    fn get(self) -> SerializationFormat {
-        if self.json_input {
-            SerializationFormat::Json
-        } else if self.yaml_input {
-            SerializationFormat::Yaml
-        } else {
-            self.input_format
-        }
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, clap::Args)]
 struct OutputFormatArg {
     /// Specify output format
-    #[arg(long, value_enum, default_value_t, group = "output-format")]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        group = "output-format",
+        conflicts_with = "format"
+    )]
     output_format: SerializationFormat,
 
     /// Write output as json values
-    #[arg(long, group = "output-format")]
+    #[arg(long, group = "output-format", conflicts_with = "format")]
     json_output: bool,
 
     /// Write output as yaml values
-    #[arg(long, group = "output-format")]
+    #[arg(long, group = "output-format", conflicts_with = "format")]
     yaml_output: bool,
 
     /// Output raw string if the output value was a string
@@ -122,14 +130,24 @@ struct OutputFormatArg {
     monochrome_output: bool,
 }
 
-impl OutputFormatArg {
-    fn get(self) -> SerializationFormat {
-        if self.json_output {
+impl Cli {
+    fn get_input_format(&self) -> SerializationFormat {
+        if self.json || self.input_format.json_input {
             SerializationFormat::Json
-        } else if self.yaml_output {
+        } else if self.yaml || self.input_format.yaml_input {
             SerializationFormat::Yaml
         } else {
-            self.output_format
+            self.input_format.input_format
+        }
+    }
+
+    fn get_output_format(&self) -> SerializationFormat {
+        if self.json || self.output_format.json_output {
+            SerializationFormat::Json
+        } else if self.yaml || self.output_format.yaml_output {
+            SerializationFormat::Yaml
+        } else {
+            self.output_format.output_format
         }
     }
 }
@@ -210,6 +228,8 @@ fn get_json_style() -> colored_json::Styler {
 }
 
 fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
+    let output_format = cli.get_output_format();
+
     let query = if let Some(path) = cli.query_file {
         log::trace!("Read query from file {path:?}");
         std::fs::read_to_string(path)?
@@ -227,7 +247,6 @@ fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
         .map_err(|e| anyhow!("{:?}", e))
         .with_context(|| "compile query")?;
 
-    let output_format = cli.output_format.get();
     match output_format {
         SerializationFormat::Json => {
             let is_stdout_terminal = stdout().is_terminal();
@@ -330,7 +349,7 @@ fn main() -> Result<()> {
             run_with_maybe_null_input(cli, Tied::new(input))
         }
     } else {
-        match cli.input_format.get() {
+        match cli.get_input_format() {
             SerializationFormat::Json => {
                 let input = serde_json::de::Deserializer::from_reader(locked)
                     .into_iter::<Value>()
