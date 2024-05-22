@@ -9,6 +9,7 @@ stdin = '''
 stdout = '''
 1
 a
+
 [
   "a",
   "b"

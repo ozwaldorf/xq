@@ -1,5 +1,5 @@
 use std::{
-    io::{stdin, stdout, BufRead, Read, Write},
+    io::{stdin, stdout, BufRead, IsTerminal, Read, Write},
     iter,
     path::PathBuf,
 };
@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use clap_verbosity_flag::Verbosity;
 use cli::input::Input;
-use is_terminal::IsTerminal;
+
 use xq::{module_loader::PreludeLoader, run_query, InputError, Value};
 
 use crate::cli::input::Tied;
@@ -134,13 +134,9 @@ struct OutputFormatArg {
     #[clap(short, long, conflicts_with = "output-format")]
     compact_output: bool,
 
-    /// Colorize output where possible (currently only JSON is supported)
-    #[clap(short = 'C', long, group = "output-color")]
-    color_output: bool,
-
-    /// Do not colorize output
-    #[clap(short = 'M', long, group = "output-color")]
-    monochrome_output: bool,
+    /// Colorize output where possible
+    #[clap(short = 'C', long, default_value_t = true)]
+    color: bool,
 }
 
 impl Cli {
@@ -184,64 +180,19 @@ fn init_log(verbosity: &Verbosity) -> Result<()> {
     .with_context(|| "Unable to initialize logger")
 }
 
-fn get_json_style() -> colored_json::Styler {
-    fn set_env_colors(styler: &mut colored_json::Styler) -> Result<()> {
-        if let Ok(env_colors) = std::env::var("XQ_COLORS") {
-            let env_colors = env_colors.split(':');
-            for (i, env_color) in env_colors.enumerate().take(7) {
-                let styles = match i {
-                    0 => vec![&mut styler.nil_value],
-                    1 => vec![&mut styler.bool_value],
-                    2 => continue, // cannot easily separate true/false values, so apply false style to both
-                    3 => vec![&mut styler.integer_value, &mut styler.float_value],
-                    4 => vec![&mut styler.string_value],
-                    5 => vec![&mut styler.array_brackets],
-                    6 => vec![&mut styler.object_brackets],
-                    _ => continue,
-                };
+fn print(should_color: bool, lang: &'static str, value: impl AsRef<[u8]>) -> Result<()> {
+    let buf = value.as_ref();
 
-                let (modifier, color) = env_color.split_once(';').unwrap_or(("0", env_color));
-                let modifier: i32 = modifier.parse()?;
-                let color: i32 = color.parse()?;
-
-                let color = match color {
-                    30 => colored_json::Color::Black,
-                    31 => colored_json::Color::Red,
-                    32 => colored_json::Color::Green,
-                    33 => colored_json::Color::Yellow,
-                    34 => colored_json::Color::Blue,
-                    35 => colored_json::Color::Magenta,
-                    36 => colored_json::Color::Cyan,
-                    37 => colored_json::Color::White,
-                    _ => colored_json::Color::Default,
-                };
-
-                for style in styles {
-                    *style = colored_json::Style::new(color);
-
-                    match modifier {
-                        1 => {}
-                        2 => *style = style.dimmed(),
-                        4 => *style = style.underline(),
-                        5 => *style = style.blink(),
-                        7 => *style = style.invert(),
-                        8 => *style = style.hidden(),
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        Ok(())
+    if should_color {
+        bat::PrettyPrinter::new()
+            .language(lang)
+            .input_from_bytes(buf)
+            .print()?;
+    } else {
+        stdout().write_all(buf)?;
     }
 
-    let mut styler = colored_json::Styler {
-        nil_value: colored_json::Style::new(colored_json::Color::Default).dimmed(),
-        ..Default::default()
-    };
-    set_env_colors(&mut styler)
-        .unwrap_or_else(|_| eprintln!("Failed to set colors from $XQ_COLORS"));
-    styler
+    Ok(())
 }
 
 fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
@@ -264,51 +215,23 @@ fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
         .map_err(|e| anyhow!("{:?}", e))
         .with_context(|| "compile query")?;
 
+    let should_color = stdout().is_terminal() && cli.output_format.color;
+
     match output_format {
         SerializationFormat::Json => {
-            let is_stdout_terminal = stdout().is_terminal();
-            let should_colorize_output = cli.output_format.color_output
-                || (is_stdout_terminal && !cli.output_format.monochrome_output);
-            let color_styler = should_colorize_output.then(get_json_style);
-
             for value in result_iterator {
                 match value {
                     Ok(Value::String(s)) if cli.output_format.raw_output => {
-                        stdout().write_all(s.as_bytes())?;
-                        println!();
+                        println!("{s}\n");
                     }
                     Ok(value) => {
-                        if cli.output_format.compact_output {
-                            if let Some(styler) = color_styler {
-                                let formatter = colored_json::ColoredFormatter::with_styler(
-                                    colored_json::CompactFormatter,
-                                    styler,
-                                );
-                                formatter.write_colored_json(
-                                    &serde_json::to_value(&value)?,
-                                    &mut stdout().lock(),
-                                    colored_json::ColorMode::On,
-                                )?;
-                                println!();
-                            } else {
-                                serde_json::ser::to_writer::<_, Value>(stdout().lock(), &value)?;
-                                println!();
-                            }
-                        } else if let Some(styler) = color_styler {
-                            let formatter = colored_json::ColoredFormatter::with_styler(
-                                colored_json::PrettyFormatter::default(),
-                                styler,
-                            );
-                            formatter.write_colored_json(
-                                &serde_json::to_value(&value)?,
-                                &mut stdout().lock(),
-                                colored_json::ColorMode::On,
-                            )?;
-                            println!();
+                        let mut value = if cli.output_format.compact_output {
+                            serde_json::to_string::<Value>(&value)?
                         } else {
-                            serde_json::ser::to_writer_pretty::<_, Value>(stdout().lock(), &value)?;
-                            println!();
-                        }
+                            serde_json::to_string_pretty::<Value>(&value)?
+                        };
+                        value.push('\n');
+                        print(should_color, "json", value)?;
                     }
                     Err(e) => eprintln!("Error: {e:?}"),
                 }
@@ -317,8 +240,12 @@ fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
         SerializationFormat::Yaml => {
             for value in result_iterator {
                 match value {
-                    Ok(value) => serde_yaml::to_writer::<_, Value>(stdout().lock(), &value)
-                        .with_context(|| "Write to output")?,
+                    Ok(value) => {
+                        let mut buf = b"---\n".to_vec();
+                        serde_yaml::to_writer(&mut buf, &value).context("Write to output")?;
+                        buf.push(b'\n');
+                        print(should_color, "yaml", buf)?;
+                    }
                     Err(e) => eprintln!("Error: {e:?}"),
                 }
             }
@@ -328,30 +255,30 @@ fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
                 match value {
                     Ok(value) => {
                         if value.is_null() {
-                            println!("\"null\"");
+                            print(should_color, "toml", "\"null\"\n")?;
                             return Ok(());
                         }
 
-                        let mut buf = String::new();
                         if value.is_object() {
-                            serde::Serialize::serialize(
-                                &value,
+                            print(
+                                should_color,
+                                "toml",
                                 if cli.output_format.compact_output {
-                                    toml::ser::Serializer::pretty(&mut buf)
+                                    toml::to_string_pretty(&value)
                                 } else {
-                                    toml::ser::Serializer::new(&mut buf)
-                                },
-                            )
-                            .context("Serialize value with toml")?;
+                                    toml::to_string(&value)
+                                }?,
+                            )?;
                         } else {
+                            let mut buf = String::new();
                             serde::Serialize::serialize(
                                 &value,
                                 toml::ser::ValueSerializer::new(&mut buf),
                             )
                             .context("Serialize value with toml")?;
+                            buf.push('\n');
+                            print(should_color, "toml", buf)?;
                         }
-
-                        println!("{}", buf);
                     }
                     Err(e) => eprintln!("Error: {e:?}"),
                 }
