@@ -60,6 +60,7 @@ serde = "1.0.136"
 derive_more = "0.99.17"
 phf = { version = "0.10.1", features = ["macros"] }
 serde_json = "1.0.79"
+toml = "0.8.13"
 html-escape = "0.2.9"
 shell-escape = "0.1.5"
 urlencoding = "2.1.0"

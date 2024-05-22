@@ -1,5 +1,6 @@
 use std::{
     io::{stdin, stdout, BufRead, Read, Write},
+    iter,
     path::PathBuf,
 };
 
@@ -40,6 +41,10 @@ struct Cli {
     #[arg(short = 'Y', long, group = "format")]
     yaml: bool,
 
+    /// Enable toml for both input and output
+    #[arg(short = 'T', long, group = "format")]
+    toml: bool,
+
     #[clap(flatten)]
     input_format: InputFormatArg,
 
@@ -55,6 +60,7 @@ enum SerializationFormat {
     #[default]
     Json,
     Yaml,
+    Toml,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, clap::Args)]
@@ -76,6 +82,9 @@ struct InputFormatArg {
     /// Read input as yaml values
     #[arg(long, group = "input-format", conflicts_with = "format")]
     yaml_input: bool,
+
+    #[arg(long, group = "input-format", conflicts_with = "format")]
+    toml_input: bool,
 
     /// Treat each line of input will be supplied to the filter as a string.
     /// When used with --slurp, the whole input text will be supplied to the filter as a single
@@ -113,6 +122,10 @@ struct OutputFormatArg {
     #[arg(long, group = "output-format", conflicts_with = "format")]
     yaml_output: bool,
 
+    /// Write output as yaml values
+    #[arg(long, group = "output-format", conflicts_with = "format")]
+    toml_output: bool,
+
     /// Output raw string if the output value was a string
     #[clap(short, long, conflicts_with = "output-format")]
     raw_output: bool,
@@ -136,6 +149,8 @@ impl Cli {
             SerializationFormat::Json
         } else if self.yaml || self.input_format.yaml_input {
             SerializationFormat::Yaml
+        } else if self.toml || self.input_format.toml_input {
+            SerializationFormat::Toml
         } else {
             self.input_format.input_format
         }
@@ -146,6 +161,8 @@ impl Cli {
             SerializationFormat::Json
         } else if self.yaml || self.output_format.yaml_output {
             SerializationFormat::Yaml
+        } else if self.toml || self.output_format.toml_output {
+            SerializationFormat::Toml
         } else {
             self.output_format.output_format
         }
@@ -306,6 +323,40 @@ fn run_with_input(cli: Cli, input: impl Input) -> Result<()> {
                 }
             }
         }
+        SerializationFormat::Toml => {
+            for value in result_iterator {
+                match value {
+                    Ok(value) => {
+                        if value.is_null() {
+                            println!("\"null\"");
+                            return Ok(());
+                        }
+
+                        let mut buf = String::new();
+                        if value.is_object() {
+                            serde::Serialize::serialize(
+                                &value,
+                                if cli.output_format.compact_output {
+                                    toml::ser::Serializer::pretty(&mut buf)
+                                } else {
+                                    toml::ser::Serializer::new(&mut buf)
+                                },
+                            )
+                            .context("Serialize value with toml")?;
+                        } else {
+                            serde::Serialize::serialize(
+                                &value,
+                                toml::ser::ValueSerializer::new(&mut buf),
+                            )
+                            .context("Serialize value with toml")?;
+                        }
+
+                        println!("{}", buf);
+                    }
+                    Err(e) => eprintln!("Error: {e:?}"),
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -361,6 +412,33 @@ fn main() -> Result<()> {
                 let input = serde_yaml::Deserializer::from_reader(locked)
                     .map(Value::deserialize)
                     .map(|r| r.map_err(InputError::new));
+                run_with_maybe_slurp_null_input(cli, Tied::new(input))
+            }
+            SerializationFormat::Toml => {
+                let mut buf = String::new();
+                let input = locked
+                    .lines()
+                    // Ensure we always end with a delimiter
+                    .chain(iter::once(Ok("+++".to_string())))
+                    .filter_map(|res| {
+                        match res {
+                            Ok(line) => {
+                                if line.trim() == "+++" {
+                                    // Split on section dividers
+                                    let value: Result<Value, _> =
+                                        toml::from_str(&buf).map_err(InputError::new);
+                                    buf.clear();
+                                    Some(value)
+                                } else {
+                                    buf.push_str(&line);
+                                    buf.push('\n');
+                                    None
+                                }
+                            }
+                            Err(e) => Some(Err(InputError::new(e))),
+                        }
+                    });
+
                 run_with_maybe_slurp_null_input(cli, Tied::new(input))
             }
         }
