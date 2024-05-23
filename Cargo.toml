@@ -79,7 +79,7 @@ time-tz = { version = "2.0.0", features = ["system", "posix-tz"] }
 onig = { version = "6.3.1", default-features = false }
 
 # bin deps
-clap = { version = "4.0.0", features = ["derive"], optional = true }
+clap = { version = "4.0.0", features = ["derive", "wrap_help"], optional = true }
 clap-verbosity-flag = { version = "2.0.0", optional = true }
 serde_yaml = { version = "0.9.34", optional = true }
 toml = { version = "0.8.13", optional = true }

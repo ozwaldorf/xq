@@ -17,10 +17,33 @@ use crate::cli::input::Tied;
 mod cli;
 
 #[derive(Parser, Debug)]
-#[clap(author, about, version)]
-#[clap(long_version(option_env!("LONG_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))))]
+#[clap(author, about, version, long_version(env!("LONG_VERSION")))]
+#[clap(before_help = "
+xq is a tool for processing JSON, YAML, and TOML inputs, applying the \
+given query to its text inputs and producing the filter's results on \
+standard output.
+
+The simplest query is `.`, which copies xq's input to its output \
+unmodified, except for formatting. For more advanced querys, see the \
+original jq manpage (`man jq`), and/or https://jqlang.github.io/jq/.
+
+Example:
+  $ echo '{\"foo\":{\"bar\":0}}' | xq .
+    {
+      \"foo\": {
+        \"bar\": 0
+      }
+    }
+")]
+#[clap(
+    max_term_width(120),
+    help_template = "\
+{name} - {about} [version {version}]\n
+{usage-heading} {usage}
+{before-help}{all-args}"
+)]
 struct Cli {
-    /// The query to run
+    /// The query to run on the input
     #[clap(default_value = ".")]
     query: String,
 
@@ -30,23 +53,23 @@ struct Cli {
 
     /// Read query from a file instead of arg
     #[clap(
-        name = "file",
         short = 'f',
         long = "from-file",
+        value_name = "FILE",
         conflicts_with = "query",
         value_hint = clap::ValueHint::FilePath
     )]
     query_file: Option<PathBuf>,
 
-    /// Enable json for both input and output
+    /// Implies --json-input and --json-output
     #[arg(short = 'J', long, group = "format")]
     json: bool,
 
-    /// Enable yaml for both input and output
+    /// Implies --yaml-input and --yaml-output
     #[arg(short = 'Y', long, group = "format")]
     yaml: bool,
 
-    /// Enable toml for both input and output
+    /// Implies --toml-input and --toml-output
     #[arg(short = 'T', long, group = "format")]
     toml: bool,
 
@@ -75,6 +98,7 @@ struct InputFormatArg {
         long,
         value_enum,
         default_value_t,
+        value_name = "FORMAT",
         group = "input-format",
         conflicts_with = "format"
     )]
@@ -88,12 +112,12 @@ struct InputFormatArg {
     #[arg(long, group = "input-format", conflicts_with = "format")]
     yaml_input: bool,
 
+    /// Read input as toml values
     #[arg(long, group = "input-format", conflicts_with = "format")]
     toml_input: bool,
 
-    /// Treat each line of input will be supplied to the filter as a string.
-    /// When used with --slurp, the whole input text will be supplied to the filter as a single
-    /// string.
+    /// Treat each line of input as a string. When used with --slurp, the
+    /// whole input text will be supplied to the query as a single string.
     #[arg(short = 'R', long, group = "input-format")]
     raw_input: bool,
 
@@ -114,6 +138,7 @@ struct OutputFormatArg {
         long,
         value_enum,
         default_value_t,
+        value_name = "FORMAT",
         group = "output-format",
         conflicts_with = "format"
     )]
@@ -127,7 +152,7 @@ struct OutputFormatArg {
     #[arg(long, group = "output-format", conflicts_with = "format")]
     yaml_output: bool,
 
-    /// Write output as yaml values
+    /// Write output as toml values
     #[arg(long, group = "output-format", conflicts_with = "format")]
     toml_output: bool,
 
