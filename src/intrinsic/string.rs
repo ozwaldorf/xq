@@ -1,5 +1,6 @@
 use std::{borrow::Cow, fmt::Write, rc::Rc};
 
+use base64::Engine;
 use itertools::Itertools;
 use num::{Float, ToPrimitive};
 
@@ -225,13 +226,13 @@ fn sh(value: Value) -> Result<Value> {
 
 fn base64(value: Value) -> Result<Value> {
     let s = stringify_inner(value);
-    let ret = base64::encode(&*s);
+    let ret = base64::prelude::BASE64_STANDARD.encode(&*s);
     Ok(ret.into())
 }
 
 fn base64d(value: Value) -> Result<Value> {
     let s = stringify_inner(value);
-    let ret = base64::decode(&*s)?;
+    let ret = base64::prelude::BASE64_STANDARD.decode(&*s)?;
     let ret = String::from_utf8(ret)?;
     Ok(ret.into())
 }
