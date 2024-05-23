@@ -1,4 +1,5 @@
 use std::{
+    fs::File,
     io::{stdin, stdout, BufRead, IsTerminal, Read, Write},
     iter,
     path::PathBuf,
@@ -22,6 +23,10 @@ struct Cli {
     /// The query to run
     #[clap(default_value = ".")]
     query: String,
+
+    /// Optional file to read. If input and output formats are unspecified,
+    /// the file extension will be used to select the default.
+    file: Option<PathBuf>,
 
     /// Read query from a file instead of arg
     #[clap(
@@ -142,12 +147,24 @@ struct OutputFormatArg {
 impl Cli {
     fn get_input_format(&self) -> SerializationFormat {
         if self.json || self.input_format.json_input {
-            SerializationFormat::Json
+            return SerializationFormat::Json;
         } else if self.yaml || self.input_format.yaml_input {
-            SerializationFormat::Yaml
+            return SerializationFormat::Yaml;
         } else if self.toml || self.input_format.toml_input {
-            SerializationFormat::Toml
+            return SerializationFormat::Toml;
         } else {
+            // If no options were specified, attempt to parse from the input file extension
+            if let Some(path) = &self.file {
+                if let Some(s) = path.extension().map(std::ffi::OsStr::to_string_lossy) {
+                    match s.as_ref() {
+                        "json" => return SerializationFormat::Json,
+                        "yaml" => return SerializationFormat::Yaml,
+                        "toml" => return SerializationFormat::Toml,
+                        _ => {}
+                    };
+                }
+            }
+
             self.input_format.input_format
         }
     }
@@ -160,6 +177,18 @@ impl Cli {
         } else if self.toml || self.output_format.toml_output {
             SerializationFormat::Toml
         } else {
+            // If no options were specified, attempt to parse from the input file extension
+            if let Some(path) = &self.file {
+                if let Some(s) = path.extension().map(std::ffi::OsStr::to_string_lossy) {
+                    match s.as_ref() {
+                        "json" => return SerializationFormat::Json,
+                        "yaml" => return SerializationFormat::Yaml,
+                        "toml" => return SerializationFormat::Toml,
+                        _ => {}
+                    };
+                }
+            }
+
             self.output_format.output_format
         }
     }
@@ -307,21 +336,14 @@ fn run_with_maybe_slurp_null_input<I: Iterator<Item = Result<Value, InputError>>
     }
 }
 
-fn main() -> Result<()> {
-    let cli: Cli = Cli::parse();
-    init_log(&cli.verbosity)?;
-    log::debug!("Parsed argument: {cli:?}");
-
-    let stdin = stdin();
-    let mut locked = stdin.lock();
-
+fn read_and_run(cli: Cli, mut reader: impl Read + BufRead) -> Result<()> {
     if cli.input_format.raw_input {
         if cli.input_format.slurp {
             let mut input = String::new();
-            locked.read_to_string(&mut input)?;
+            reader.read_to_string(&mut input)?;
             run_with_maybe_null_input(cli, Tied::new(std::iter::once(Ok(Value::from(input)))))
         } else {
-            let input = locked
+            let input = reader
                 .lines()
                 .map(|l| l.map(Value::from).map_err(InputError::new));
             run_with_maybe_null_input(cli, Tied::new(input))
@@ -329,21 +351,21 @@ fn main() -> Result<()> {
     } else {
         match cli.get_input_format() {
             SerializationFormat::Json => {
-                let input = serde_json::de::Deserializer::from_reader(locked)
+                let input = serde_json::de::Deserializer::from_reader(reader)
                     .into_iter::<Value>()
                     .map(|r| r.map_err(InputError::new));
                 run_with_maybe_slurp_null_input(cli, Tied::new(input))
             }
             SerializationFormat::Yaml => {
                 use serde::Deserialize;
-                let input = serde_yaml::Deserializer::from_reader(locked)
+                let input = serde_yaml::Deserializer::from_reader(reader)
                     .map(Value::deserialize)
                     .map(|r| r.map_err(InputError::new));
                 run_with_maybe_slurp_null_input(cli, Tied::new(input))
             }
             SerializationFormat::Toml => {
                 let mut buf = String::new();
-                let input = locked
+                let input = reader
                     .lines()
                     // Ensure we always end with a delimiter
                     .chain(iter::once(Ok("+++".to_string())))
@@ -365,9 +387,22 @@ fn main() -> Result<()> {
                             Err(e) => Some(Err(InputError::new(e))),
                         }
                     });
-
                 run_with_maybe_slurp_null_input(cli, Tied::new(input))
             }
         }
+    }
+}
+
+fn main() -> Result<()> {
+    let cli: Cli = Cli::parse();
+    init_log(&cli.verbosity)?;
+    log::debug!("Parsed argument: {cli:?}");
+
+    if let Some(path) = &cli.file {
+        let file = std::io::BufReader::new(File::open(path)?);
+        log::debug!("Opened file: {path:?}");
+        read_and_run(cli, file)
+    } else {
+        read_and_run(cli, stdin().lock())
     }
 }
