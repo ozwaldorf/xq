@@ -62,7 +62,7 @@ mod test {
     fn parse_query(q: &str) -> ParseResult<ast::Query> {
         let lexer = lexer::Lexer::new(q);
         parser::QueryParser::new()
-            .parse(q, lexer.into_iter())
+            .parse(q, lexer)
             .map_err(|e| e.into())
     }
 

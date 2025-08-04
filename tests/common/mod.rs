@@ -16,7 +16,6 @@ pub(crate) fn run_test(query: &str, input: &str, output: &str) -> Result<(), Box
     let input: SharedIterator<_> = serde_json::de::Deserializer::from_str(input)
         .into_iter::<Value>()
         .map(|r| r.map_err(InputError::new))
-        .into_iter()
         .into();
     let expected: Vec<_> = serde_json::de::Deserializer::from_str(output)
         .into_iter::<Value>()
@@ -44,7 +43,6 @@ pub(crate) fn test_no_panic(query: &str, input: &str) -> Result<(), Box<dyn std:
     let input: SharedIterator<_> = serde_json::de::Deserializer::from_str(input)
         .into_iter::<Value>()
         .map(|r| r.map_err(InputError::new))
-        .into_iter()
         .into();
     run_query(query, input.clone(), input, &PreludeLoader())?.for_each(drop);
     Ok(())

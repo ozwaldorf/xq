@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{stdin, stdout, BufRead, IsTerminal, Read, Write},
+    io::{stdin, stdout, BufRead, IsTerminal, Write},
     iter,
     path::PathBuf,
 };
@@ -172,11 +172,11 @@ struct OutputFormatArg {
 impl Cli {
     fn get_input_format(&self) -> SerializationFormat {
         if self.json || self.input_format.json_input {
-            return SerializationFormat::Json;
+            SerializationFormat::Json
         } else if self.yaml || self.input_format.yaml_input {
-            return SerializationFormat::Yaml;
+            SerializationFormat::Yaml
         } else if self.toml || self.input_format.toml_input {
-            return SerializationFormat::Toml;
+            SerializationFormat::Toml
         } else {
             // If no options were specified, attempt to parse from the input file extension
             if let Some(path) = &self.file {
@@ -361,7 +361,7 @@ fn run_with_maybe_slurp_null_input<I: Iterator<Item = Result<Value, InputError>>
     }
 }
 
-fn read_and_run(cli: Cli, mut reader: impl Read + BufRead) -> Result<()> {
+fn read_and_run(cli: Cli, mut reader: impl BufRead) -> Result<()> {
     if cli.input_format.raw_input {
         if cli.input_format.slurp {
             let mut input = String::new();

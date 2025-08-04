@@ -89,8 +89,7 @@ mod test {
             assert_eq!(Some(9 - i), s.pop());
         }
         assert_eq!(None, s.pop());
-        for i in 0..10 {
-            let mut s = v[i].clone();
+        for (i, mut s) in v.iter().cloned().enumerate().take(10) {
             for j in 0..=i {
                 assert_eq!(Some(i - j), s.pop());
             }

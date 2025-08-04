@@ -47,7 +47,7 @@ fn parse(c: &mut Criterion) {
     c.bench_function("parse", |b| {
         b.iter_batched(
             || tokens.clone(),
-            |tokens| xq_lang::parser::ProgramParser::new().parse(PRELUDE, tokens.into_iter()),
+            |tokens| xq_lang::parser::ProgramParser::new().parse(PRELUDE, tokens),
             BatchSize::SmallInput,
         )
     });
