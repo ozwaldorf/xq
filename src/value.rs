@@ -1,7 +1,6 @@
 use std::{
     borrow::Borrow,
     cmp::Ordering,
-    collections::HashMap,
     fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
     ops::Deref,
@@ -10,6 +9,7 @@ use std::{
 };
 
 use derive_more::{DebugCustom, Display, Index, IndexMut, IntoIterator, IsVariant, Unwrap};
+use indexmap::IndexMap;
 use itertools::Itertools;
 use num::Float;
 use serde::{
@@ -21,7 +21,7 @@ use serde::{
 use crate::Number;
 
 type Vector = Vec<Value>;
-type Map = HashMap<RcString, Value>;
+type Map = IndexMap<RcString, Value>;
 pub type RcString = Rc<String>;
 
 #[derive(
@@ -149,10 +149,10 @@ impl Object {
         RcString: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        self.0.remove(key)
+        self.0.shift_remove(key)
     }
 
-    pub fn entry(&mut self, key: RcString) -> std::collections::hash_map::Entry<RcString, Value> {
+    pub fn entry(&mut self, key: RcString) -> indexmap::map::Entry<RcString, Value> {
         self.0.entry(key)
     }
 }
